@@ -20,7 +20,11 @@ def load_model(model_path: str = "model"):
     """
     model = AutoModelForSequenceClassification.from_pretrained(model_path)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
     model.eval()
+
     return model, tokenizer
 
 
@@ -32,7 +36,8 @@ def run_against_set(adv_csv_path: str, model, tokenizer) -> pd.DataFrame:
     Read label names from model.config.id2label — do not hard-code class names.
     """
     df = pd.read_csv(adv_csv_path)
-    id2label = {int(k): v for k, v in model.config.id2label.items()}
+
+    id2label = model.config.id2label
 
     encodings = tokenizer(
         df["text"].tolist(),
@@ -43,16 +48,19 @@ def run_against_set(adv_csv_path: str, model, tokenizer) -> pd.DataFrame:
     )
 
     device = next(model.parameters()).device
-    encodings = {key: value.to(device) for key, value in encodings.items()}
+    encodings = {k: v.to(device) for k, v in encodings.items()}
 
     with torch.no_grad():
         outputs = model(**encodings)
         probabilities = torch.softmax(outputs.logits, dim=-1)
         predicted_ids = torch.argmax(probabilities, dim=-1)
 
-    predicted_labels = [id2label[int(idx)] for idx in predicted_ids.cpu()]
+    predicted_labels = [
+        id2label[int(idx)] for idx in predicted_ids.cpu()
+    ]
+
     predicted_probabilities = [
-        float(probabilities[i, predicted_ids[i]].cpu())
+        float(probabilities[i, int(predicted_ids[i])].cpu())
         for i in range(len(predicted_ids))
     ]
 
@@ -60,7 +68,12 @@ def run_against_set(adv_csv_path: str, model, tokenizer) -> pd.DataFrame:
     results["predicted_label"] = predicted_labels
     results["predicted_probability"] = predicted_probabilities
     results["correct"] = results["predicted_label"] == results["expected_label"]
+
     return results
+
+    
+
+    
 
 
 def main() -> None:
