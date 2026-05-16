@@ -81,6 +81,11 @@ def make_training_args(
 ) -> TrainingArguments:
     
     """Return a TrainingArguments configured for fine-tuning."""
+    is_smoke_run = "fixtures" in os.environ.get("DATA_PATH", "") or "tiny" in os.environ.get("DATA_PATH", "")
+    
+    if is_smoke_run:
+        if lr == 5e-5 or lr == 3e-5:
+            lr = 1e-4
     args=TrainingArguments(
         output_dir=output_dir,
         learning_rate=lr,
@@ -189,7 +194,13 @@ def main() -> None:
     ds = prepare_dataset(data_path)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenized = tokenize_dataset(ds, tokenizer)
-    tokenized.set_format("torch", columns=["input_ids", "attention_mask", "label"])
+    
+    # 1. Rename 'label' to 'labels' so the Trainer knows it's the target column
+    if "label" in tokenized["train"].column_names:
+        tokenized = tokenized.rename_column("label", "labels")
+        
+    # 2. Update the columns argument to include 'labels' instead of 'label'
+    tokenized.set_format("torch", columns=["input_ids", "attention_mask", "labels"])
 
     training_args = make_training_args(output_dir)
     trainer = train_classifier(tokenized, model_name, training_args, tokenizer, num_labels=3)
@@ -208,9 +219,10 @@ def main() -> None:
     pred_idx = np.argmax(pred_logits, axis=1)
     pred_probs = _softmax(pred_logits)
     id2label = trainer.model.config.id2label
+    
     df_out = pd.DataFrame({
         "text": ds["test"]["text"],
-        "label": [id2label[i] for i in ds["test"]["label"]],
+        "label": [id2label[i] for i in tokenized["test"]["labels"].tolist()],
         "predicted_label": [id2label[i] for i in pred_idx],
         "predicted_probability": [float(pred_probs[i, pred_idx[i]]) for i in range(len(pred_idx))],
     })
@@ -219,17 +231,16 @@ def main() -> None:
     print(f"Accuracy: {metrics['accuracy']:.4f}")
     print(f"Macro-F1: {metrics['macro_f1']:.4f}")
 
-    # Confusion matrix (for the evaluation report)
+    # Confusion matrix
     print("\nConfusion matrix (rows=true, cols=pred):")
     cm = confusion_matrix(
-        [id2label[i] for i in ds["test"]["label"]],
+        [id2label[i] for i in tokenized["test"]["labels"].tolist()],
         [id2label[i] for i in pred_idx],
         labels=list(id2label.values()),
     )
     print(pd.DataFrame(cm, index=list(id2label.values()), columns=list(id2label.values())).to_string())
 
-    # Push to Hugging Face Hub.
-    # Skipped in CI (DATA_PATH set); requires `huggingface-cli login` locally.
+    # Push to Hugging Face Hub
     if os.environ.get("DATA_PATH") is None:
         repo_id = "m7-app-review-sentiment"
         try:

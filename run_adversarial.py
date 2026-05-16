@@ -37,7 +37,8 @@ def run_against_set(adv_csv_path: str, model, tokenizer) -> pd.DataFrame:
     """
     df = pd.read_csv(adv_csv_path)
 
-    id2label = model.config.id2label
+    # CRITICAL: Normalize keys to integers because HF config loading turns them into strings ('0', '1', etc.)
+    id2label = {int(k): v for k, v in model.config.id2label.items()}
 
     encodings = tokenizer(
         df["text"].tolist(),
@@ -55,6 +56,7 @@ def run_against_set(adv_csv_path: str, model, tokenizer) -> pd.DataFrame:
         probabilities = torch.softmax(outputs.logits, dim=-1)
         predicted_ids = torch.argmax(probabilities, dim=-1)
 
+    # This loop will now execute without pulling a KeyError!
     predicted_labels = [
         id2label[int(idx)] for idx in predicted_ids.cpu()
     ]
