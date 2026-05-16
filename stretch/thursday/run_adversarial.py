@@ -18,10 +18,10 @@ def load_model(model_path: str = "model"):
 
     Defaults to local 'model' (your Lab 7A checkpoint). CI overrides via MODEL_PATH env.
     """
-    # TODO: AutoModelForSequenceClassification.from_pretrained(model_path)
-    # TODO: AutoTokenizer.from_pretrained(model_path)
-    # TODO: return both
-    raise NotImplementedError
+    model = AutoModelForSequenceClassification.from_pretrained(model_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    model.eval()
+    return model, tokenizer
 
 
 def run_against_set(adv_csv_path: str, model, tokenizer) -> pd.DataFrame:
@@ -31,13 +31,36 @@ def run_against_set(adv_csv_path: str, model, tokenizer) -> pd.DataFrame:
 
     Read label names from model.config.id2label — do not hard-code class names.
     """
-    # TODO: read adv_csv_path with pandas
-    # TODO: for each row, tokenize + forward pass + softmax + argmax
-    # TODO: convert argmax index to label name via model.config.id2label
-    # TODO: build a results DataFrame with predicted_label, predicted_probability, correct
-    # TODO: return the DataFrame
-    raise NotImplementedError
+    df = pd.read_csv(adv_csv_path)
+    id2label = {int(k): v for k, v in model.config.id2label.items()}
 
+    encodings = tokenizer(
+        df["text"].tolist(),
+        truncation=True,
+        padding=True,
+        max_length=128,
+        return_tensors="pt"
+    )
+
+    device = next(model.parameters()).device
+    encodings = {key: value.to(device) for key, value in encodings.items()}
+
+    with torch.no_grad():
+        outputs = model(**encodings)
+        probabilities = torch.softmax(outputs.logits, dim=-1)
+        predicted_ids = torch.argmax(probabilities, dim=-1)
+
+        predicted_labels = [id2label[int(idx)] for idx in predicted_ids.cpu()]
+        predicted_probabilities = [
+        float(probabilities[i, predicted_ids[i]].cpu())
+        for i in range(len(predicted_ids))
+    ]
+
+    results = df.copy()
+    results["predicted_label"] = predicted_labels
+    results["predicted_probability"] = predicted_probabilities
+    results["correct"] = results["predicted_label"] == results["expected_label"]
+    return results
 
 def main() -> None:
     """Orchestrate; write results.csv."""
