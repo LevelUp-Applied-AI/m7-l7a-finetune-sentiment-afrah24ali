@@ -19,6 +19,7 @@ import os
 import numpy as np
 import pandas as pd
 from datasets import Dataset, DatasetDict
+from transformers.trainer_utils import IntervalStrategy  
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 from transformers import (
     AutoModelForSequenceClassification,
@@ -78,8 +79,9 @@ def make_training_args(
     batch_size: int = 8,
     seed: int = 42,
 ) -> TrainingArguments:
+    
     """Return a TrainingArguments configured for fine-tuning."""
-    return TrainingArguments(
+    args=TrainingArguments(
         output_dir=output_dir,
         learning_rate=lr,
         num_train_epochs=epochs,
@@ -90,6 +92,14 @@ def make_training_args(
         save_strategy="epoch",
         logging_steps=50,
     )
+    args.eval_strategy = "epoch"
+    args.save_strategy = "epoch"
+
+    return args
+
+
+
+
 
 
 def compute_metrics(eval_pred):
